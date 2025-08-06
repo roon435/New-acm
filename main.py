@@ -612,12 +612,27 @@ async def add_item_to_stash(interaction: discord.Interaction, item_file: discord
     await interaction.response.defer(ephemeral=True)
 
     user_id = interaction.user.id
-    if user_id not in user_session_data or is_jwt_expired(user_session_data[user_id]["auth_token"]):
-        await interaction.followup.send("❌ Your session has expired or you are not authenticated. Please run /acplayer first.", ephemeral=True)
+    if user_id not in user_session_data:
+        await interaction.followup.send("❌ You are not authenticated. Please run `/acplayer` first.", ephemeral=True)
         return
 
     auth_token = user_session_data[user_id]["auth_token"]
+    refresh_token_val = user_session_data[user_id]["refresh_token"]
     nakama_user_id = user_session_data[user_id]["nakama_user_id"]
+
+    # Check and refresh the token if it's expired
+    if is_jwt_expired(auth_token):
+        new_auth_token, new_refresh_token = await refresh_token(refresh_token_val)
+        if new_auth_token and new_refresh_token:
+            user_session_data[user_id]["auth_token"] = new_auth_token
+            user_session_data[user_id]["refresh_token"] = new_refresh_token
+            auth_token = new_auth_token
+            save_session_data()
+        else:
+            await interaction.followup.send("❌ Your session has expired and could not be refreshed. Please run `/acplayer` again to re-authenticate.", ephemeral=True)
+            del user_session_data[user_id]
+            save_session_data()
+            return
 
     try:
         item_data = await item_file.read()
@@ -686,8 +701,6 @@ async def nutbalance(interaction: discord.Interaction):
             user_session_data[user_id]["auth_token"] = new_auth_token
             user_session_data[user_id]["refresh_token"] = new_refresh_token
             auth_token = new_auth_token # Use the new token for subsequent requests
-            # We cannot send another followup here as it might fail if the defer was not ephemeral.
-            # The next followup will send the main message.
             save_session_data()
         else:
             await interaction.followup.send("❌ Your session has expired and could not be refreshed. Please run `/acplayer` again to re-authenticate.", ephemeral=True)
@@ -858,7 +871,6 @@ async def retrieve_friends_list(interaction: discord.Interaction):
             user_session_data[user_id]["auth_token"] = new_auth_token
             user_session_data[user_id]["refresh_token"] = new_refresh_token
             auth_token = new_auth_token # Use the new token for subsequent requests
-            # Not sending a followup message here, the main one will follow.
             save_session_data() # Save the updated tokens
         else:
             await interaction.followup.send("❌ Your session has expired and could not be refreshed. Please run `/acplayer` again to re-authenticate.", ephemeral=True)
